@@ -27,9 +27,6 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import RobustScaler
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
-from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LinearRegression
 import warnings
 import time
 from contextlib import nullcontext
@@ -755,7 +752,15 @@ def apply_feature_engineering(data, start_idx=0, target_col='BOD-S'):
     return feature_data
 
 
-def create_data_splits(data, seq_len=24, test_size=0.2, augment_factor=1, target_col='BOD-S', use_feature_engineering=True):
+def create_data_splits(
+    data,
+    seq_len=24,
+    test_size=0.2,
+    augment_factor=1,
+    target_col='BOD-S',
+    use_feature_engineering=True,
+    top_feature_count=None
+):
     """
     创建时间序列数据划分 - 将整个数据集生成序列后随机划分
     """
@@ -764,6 +769,11 @@ def create_data_splits(data, seq_len=24, test_size=0.2, augment_factor=1, target
     if use_feature_engineering:
         engineered_data = apply_feature_engineering(data, start_idx=0, target_col=target_col)
         engineered_data = engineered_data.dropna().reset_index(drop=True)
+        if top_feature_count is not None and top_feature_count > 0:
+            print(f"选择与{target_col}最相关的前 {top_feature_count} 个特征...")
+            correlation = engineered_data.corr().abs()[target_col].sort_values(ascending=False)
+            selected_features = [col for col in correlation.index if col != target_col][:top_feature_count]
+            engineered_data = engineered_data[selected_features + [target_col]]
     else:
         engineered_data = data.copy().reset_index(drop=True)
     
@@ -1048,21 +1058,27 @@ def main():
     # 2. 数据预处理
     processed_data = preprocess_wastewater_data(data, selected_features)
     
-    # 模型参数
-    seq_len = 1  # 使用当前时刻特征进行预测
+    # 模型参数（进阶优化以冲击0.95）
+    seq_len = 3  # 增加序列长度以利用更多历史信息
     batch_size = 32
-    epochs = 120
-    lr = 5e-4
+    epochs = 180  # 进一步增加训练轮数
+    lr = 2e-4  # 进一步降低学习率以获得更精细收敛
     
-    # 3. 创建数据集
+    # 3. 创建数据集（启用特征工程 + 关键特征选择）
     train_dataset, test_dataset, scaler, input_dim, engineered_data, full_train_indices, test_indices = create_data_splits(
-        processed_data, seq_len=seq_len, test_size=0.3, augment_factor=1, use_feature_engineering=False
+        processed_data,
+        seq_len=seq_len,
+        test_size=0.2,
+        augment_factor=2,
+        target_col='BOD-S',
+        use_feature_engineering=True,
+        top_feature_count=60
     )
 
     print(f"\n实际输入特征维度: {input_dim}")
     
     # 4. 划分验证集
-    train_size = int(len(train_dataset) * 0.8)
+    train_size = max(1, int(len(train_dataset) * 0.85))
     loader_train_indices = list(range(train_size))
     loader_val_indices = list(range(train_size, len(train_dataset)))
     
@@ -1118,14 +1134,14 @@ def main():
     val_loader = DataLoader(val_subset, **val_test_loader_kwargs)
     test_loader = DataLoader(test_dataset, **val_test_loader_kwargs)
     
-    # 6. 创建Auto-Mamformer模型（简化配置适配 tabular 数据）
+    # 6. 创建Auto-Mamformer模型（优化配置）
     model = AutoMamformerModel(
         input_dim=input_dim,
-        d_model=64,
-        n_layers=2,
+        d_model=128,  # 增加模型容量
+        n_layers=4,  # 增加层数
         seq_len=seq_len,
         pred_len=1,
-        dropout=0.05
+        dropout=0.15  # 增加dropout防止过拟合
     )
     
     print(f"\n模型参数数量: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
@@ -1133,45 +1149,53 @@ def main():
     # 7. 训练模型
     print("\n开始训练...")
     model, train_losses, val_losses = train_final_model(
-        model, train_loader, val_loader, epochs=epochs, lr=lr, patience=15
+        model, train_loader, val_loader, epochs=epochs, lr=lr, patience=30  # 增加耐心值
     )
     
-    # 8. 计算校准器（使用全部训练序列）
-    print("\n计算预测校准器（Gradient Boosting）...")
-    calibration_loader = DataLoader(train_dataset, **val_test_loader_kwargs)
-    train_pred_rescaled, train_true_rescaled = get_rescaled_predictions(
-        model, calibration_loader, scaler, return_features=False
+    # 8. 评估模型（无校准器）
+    print("\n开始评估（仅模型输出）...")
+    test_pred_rescaled, test_true_rescaled = get_rescaled_predictions(
+        model, test_loader, scaler, return_features=False
     )
-    train_features_raw = engineered_data.iloc[full_train_indices, :-1].to_numpy()
-    feature_scaler = StandardScaler()
-    train_features_scaled = feature_scaler.fit_transform(train_features_raw)
+    r2 = r2_score(test_true_rescaled, test_pred_rescaled)
+    mse = mean_squared_error(test_true_rescaled, test_pred_rescaled)
+    mae = mean_absolute_error(test_true_rescaled, test_pred_rescaled)
+    rmse = np.sqrt(mse)
+
+    print(f"\n模型评估结果:")
+    print(f"R² Score: {r2:.4f}")
+    print(f"MSE: {mse:.4f}")
+    print(f"MAE: {mae:.4f}")
+    print(f"RMSE: {rmse:.4f}")
+
+    # 可视化
+    plt.figure(figsize=(14, 5))
     
-    gb_regressor = GradientBoostingRegressor(
-        random_state=42,
-        n_estimators=1500,
-        learning_rate=0.015,
-        max_depth=3,
-        subsample=0.9
-    )
-    gb_regressor.fit(train_features_scaled, train_true_rescaled)
-    gb_train_pred = gb_regressor.predict(train_features_scaled)
+    plt.subplot(1, 2, 1)
+    plt.plot(test_true_rescaled[:200], label='True BOD-S', alpha=0.7)
+    plt.plot(test_pred_rescaled[:200], label='Predicted BOD-S', alpha=0.7)
+    plt.xlabel('Sample Index')
+    plt.ylabel('BOD-S (mg/L)')
+    plt.title('Auto-Mamformer: BOD-S Prediction Results (First 200 Samples)')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
     
-    ensemble_train_features = np.column_stack([train_pred_rescaled, gb_train_pred])
-    calibrator = LinearRegression()
-    calibrator.fit(ensemble_train_features, train_true_rescaled)
-    train_calib_pred = calibrator.predict(ensemble_train_features)
-    train_calib_r2 = r2_score(train_true_rescaled, train_calib_pred)
-    print(f"校准器训练 R²: {train_calib_r2:.4f}")
+    plt.subplot(1, 2, 2)
+    plt.scatter(test_true_rescaled, test_pred_rescaled, alpha=0.5)
+    plt.plot([test_true_rescaled.min(), test_true_rescaled.max()],
+             [test_true_rescaled.min(), test_true_rescaled.max()],
+             'r--', lw=2)
+    plt.xlabel('True BOD-S (mg/L)')
+    plt.ylabel('Predicted BOD-S (mg/L)')
+    plt.title(f'Prediction vs True (R² = {r2:.4f})')
+    plt.grid(True, alpha=0.3)
     
-    # 9. 评估模型
-    print("\n开始评估...")
-    test_features_raw = engineered_data.iloc[test_indices, :-1].to_numpy()
-    test_features_scaled = feature_scaler.transform(test_features_raw)
-    gb_test_pred = gb_regressor.predict(test_features_scaled)
-    stacked_test_features = gb_test_pred.reshape(-1, 1)
-    r2, mse, mae, rmse, predictions, true_values = evaluate_model(
-        model, test_loader, scaler, calibrator=calibrator, external_features=stacked_test_features
-    )
+    plt.tight_layout()
+    plt.savefig('result/auto_mamformer_bod_results.png', dpi=300, bbox_inches='tight')
+    print("\n预测结果图已保存至: result/auto_mamformer_bod_results.png")
+    
+    predictions = test_pred_rescaled
+    true_values = test_true_rescaled
 
     # 10. 保存结果
     results = {
@@ -1183,11 +1207,7 @@ def main():
         'true_values': true_values,
         'train_losses': train_losses,
         'val_losses': val_losses,
-        'calibrator_type': 'LinearRegressionStacked',
-        'calibrator_train_r2': train_calib_r2,
-        'feature_scaler_mean': feature_scaler.mean_.tolist(),
-        'feature_scaler_scale': feature_scaler.scale_.tolist(),
-        'gb_params': gb_regressor.get_params()
+        'calibrator_type': None
     }
     
     np.save('result/auto_mamformer_bod_results.npy', results)
