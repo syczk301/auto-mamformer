@@ -1,0 +1,156 @@
+============================================================
+Auto-Mamformer - 废水处理BOD预测
+Mamba + Autoformer混合架构
+============================================================
+============================================================
+废水处理数据分析与特征选择
+============================================================
+
+原始数据形状: (527, 38)
+列名: [' Q-E ', ' ZN-E', 'PH-E ', 'BOD-E', 'COD-E', 'SS-E', 'VSS-E', 'SED-E', 'COND-E', 'PH-P', 'BOD-P', 'SS-P', 'VSS-P', 'SED-P', 'COND-P', 'PH-D', 'BOD-D', 'COD-D', 'SS-D ', ' VSS-D', 'SED-D', 'COND-D', 'PH-S', 'BOD-S', 'SS-S', 'VSS-S', 'SED-S', 'COND-S', 'RD-BOD-P', 'RD-SS-P', 'RD-SED-P', 'RD-BOD-S', 'RD-COD-S', 'RD-BOD-G', 'RD-COD-G', 'RD-SS-G', 'RD-SED-G', 'COD-S']
+
+数据统计信息:
+               Q-E         ZN-E       PH-E   ...     RD-SS-G    RD-SED-G       COD-S
+count    527.000000  527.000000  527.000000  ...  527.000000  527.000000  527.000000
+mean   37078.832370    2.126493    7.810095  ...   89.682081   99.470115   83.635397
+std     5927.549736    1.838746    0.239837  ...    5.224356    1.041981   28.440185
+min    24978.000000    0.100000    7.200000  ...   66.200000   88.900000    9.000000
+25%    33024.500000    0.900000    7.600000  ...   87.800000   99.350000   63.500000
+50%    35789.000000    1.500000    7.800000  ...   90.700000   99.750000   83.000000
+75%    40897.000000    2.885000    8.000000  ...   93.000000  100.000000   99.750000
+max    55930.000000   10.000000    8.500000  ...   99.400000  100.000000  175.000000
+
+[8 rows x 38 columns]
+
+缺失值统计:
+Series([], dtype: int64)
+
+与BOD-S的相关性分析:
+BOD-S       1.000000
+SS-S        0.660490
+BOD-D       0.486567
+COD-S       0.462558
+COD-D       0.447372
+BOD-E       0.343652
+COD-E       0.342902
+BOD-P       0.282733
+SED-P       0.277489
+SS-D        0.255732
+SED-S       0.251698
+SED-E       0.225107
+SED-D       0.176454
+COND-D      0.175051
+VSS-P       0.173406
+VSS-E       0.163005
+COND-S      0.152722
+COND-P      0.147767
+COND-E      0.145446
+ VSS-D      0.132436
+SS-P        0.127671
+PH-E        0.096709
+SS-E        0.090494
+PH-P        0.081110
+VSS-S       0.071371
+PH-D        0.015181
+RD-SED-P    0.008038
+ ZN-E       0.005567
+RD-SS-P    -0.019542
+ Q-E       -0.113483
+RD-COD-S   -0.132602
+RD-BOD-P   -0.173792
+RD-COD-G   -0.185811
+RD-SED-G   -0.193975
+PH-S       -0.241141
+RD-BOD-S   -0.486405
+RD-SS-G    -0.494421
+RD-BOD-G   -0.580248
+Name: BOD-S, dtype: float64
+
+相关性图已保存至: result/bod_feature_correlation.png
+
+使用全部特征进行建模（总计 37 个输入特征）
+  -  Q-E : 相关系数 = -0.113
+  -  ZN-E: 相关系数 = 0.006
+  - PH-E : 相关系数 = 0.097
+  - BOD-E: 相关系数 = 0.344
+  - COD-E: 相关系数 = 0.343
+  - SS-E: 相关系数 = 0.090
+  - VSS-E: 相关系数 = 0.163
+  - SED-E: 相关系数 = 0.225
+  - COND-E: 相关系数 = 0.145
+  - PH-P: 相关系数 = 0.081
+  - BOD-P: 相关系数 = 0.283
+  - SS-P: 相关系数 = 0.128
+  - VSS-P: 相关系数 = 0.173
+  - SED-P: 相关系数 = 0.277
+  - COND-P: 相关系数 = 0.148
+  - PH-D: 相关系数 = 0.015
+  - BOD-D: 相关系数 = 0.487
+  - COD-D: 相关系数 = 0.447
+  - SS-D : 相关系数 = 0.256
+  -  VSS-D: 相关系数 = 0.132
+  - SED-D: 相关系数 = 0.176
+  - COND-D: 相关系数 = 0.175
+  - PH-S: 相关系数 = -0.241
+  - SS-S: 相关系数 = 0.660
+  - VSS-S: 相关系数 = 0.071
+  - SED-S: 相关系数 = 0.252
+  - COND-S: 相关系数 = 0.153
+  - RD-BOD-P: 相关系数 = -0.174
+  - RD-SS-P: 相关系数 = -0.020
+  - RD-SED-P: 相关系数 = 0.008
+  - RD-BOD-S: 相关系数 = -0.486
+  - RD-COD-S: 相关系数 = -0.133
+  - RD-BOD-G: 相关系数 = -0.580
+  - RD-COD-G: 相关系数 = -0.186
+  - RD-SS-G: 相关系数 = -0.494
+  - RD-SED-G: 相关系数 = -0.194
+  - COD-S: 相关系数 = 0.463
+
+开始废水数据预处理...
+
+缺失值处理前: 0 个缺失值
+缺失值处理后: 0 个缺失值
+
+异常值处理...
+预处理后数据形状: (527, 38)
+
+BOD-S统计信息:
+count    527.000000
+mean      18.533094
+std        6.450748
+min        3.000000
+25%       14.000000
+50%       18.000000
+75%       22.000000
+max       38.490307
+Name: BOD-S, dtype: float64
+
+创建时间序列数据（整体特征工程 + 随机划分）...
+
+对索引 0 开始的数据进行特征工程...
+特征工程后数据形状: (515, 135)
+因NaN删除的行数: 12
+选择与BOD-S最相关的前 60 个特征...
+特征工程后数据形状: (515, 61)
+输入特征数量: 60
+可用序列总数: 513
+训练样本数: 411 | 测试样本数: 102
+
+实际输入特征维度: 60
+
+模型参数数量: 1,184,455
+
+开始训练...
+检测到GPU: NVIDIA GeForce RTX 5060
+显存总量: 7.96 GB
+
+开始训练Auto-Mamformer模型，设备: cuda
+Traceback (most recent call last):
+  File "D:\mywork\python\auto-mamformer\auto_mamformer_bod.py", line 1241, in <module>
+    main()
+  File "D:\mywork\python\auto-mamformer\auto_mamformer_bod.py", line 1151, in main
+    model, train_losses, val_losses = train_final_model(
+  File "D:\mywork\python\auto-mamformer\auto_mamformer_bod.py", line 929, in train_final_model
+    print(f'Epoch [{epoch + 1:2d}/{epochs}] '
+UnicodeEncodeError: 'gbk' codec can't encode character '\xb2' in position 46: illegal multibyte sequence
