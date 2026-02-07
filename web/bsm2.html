@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Auto-Mamformer BSM2 Dashboard</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body data-page="bsm2">
+  <div class="bg-orb orb-a"></div>
+  <div class="bg-orb orb-b"></div>
+  <div class="bg-grid"></div>
+
+  <main class="page">
+    <header class="hero reveal">
+      <div class="hero-nav">
+        <a class="switch-link" href="./index.html">Water 数据页</a>
+        <a class="switch-link active" href="./bsm2.html">BSM2 数据页</a>
+      </div>
+      <p class="hero-kicker">Auto-Mamformer Dashboard</p>
+      <h1>BSM2 结果总览</h1>
+      <p class="hero-desc">
+        展示 BSM2 数据集下 COD/BOD5 预测的核心指标和全部结果工件。
+      </p>
+      <div class="hero-meta">
+        <span id="meta-updated">读取中...</span>
+        <span id="meta-count">工件统计中...</span>
+      </div>
+    </header>
+
+    <section class="section reveal" id="kpi-section">
+      <div class="section-head">
+        <h2>核心指标</h2>
+      </div>
+      <div class="kpi-grid" id="kpi-grid"></div>
+    </section>
+
+    <section class="section reveal" id="compare-section">
+      <div class="section-head">
+        <h2 id="compare-title">模型对比</h2>
+      </div>
+      <div class="panel">
+        <div class="table-wrap">
+          <table id="compare-table">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th>R2</th>
+                <th>MAPE (%)</th>
+                <th>MAE (ug/m3)</th>
+                <th>RMSE (ug/m3)</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="bars" id="r2-bars"></div>
+      </div>
+    </section>
+
+    <section class="section reveal" id="track-section">
+      <div class="section-head">
+        <h2>预测轨迹</h2>
+      </div>
+      <div class="track-grid" id="track-grid"></div>
+    </section>
+
+    <section class="section reveal" id="figure-section">
+      <div class="section-head">
+        <h2>图像结果</h2>
+      </div>
+      <div class="gallery" id="figure-gallery"></div>
+    </section>
+
+    <section class="section reveal" id="artifact-section">
+      <div class="section-head">
+        <h2>全部工件</h2>
+      </div>
+      <div class="panel">
+        <div class="table-wrap">
+          <table id="artifact-table">
+            <thead>
+              <tr>
+                <th>文件名</th>
+                <th>类型</th>
+                <th>分组</th>
+                <th>说明</th>
+                <th>链接</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <template id="kpi-card-template">
+    <article class="kpi-card">
+      <p class="kpi-label"></p>
+      <p class="kpi-value"></p>
+      <p class="kpi-sub"></p>
+    </article>
+  </template>
+
+  <script src="./app.js" defer></script>
+</body>
+</html>

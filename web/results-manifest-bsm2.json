@@ -1,0 +1,36 @@
+{
+  "generated_for": "auto-mamformer-bsm2",
+  "result_root": "../result",
+  "artifacts": [
+    {
+      "name": "auto_mamformer_bsm2_cod_results.npy",
+      "type": "npy",
+      "group": "bsm2",
+      "description": "BSM2 COD 预测结果数据"
+    },
+    {
+      "name": "auto_mamformer_bsm2_cod_results.png",
+      "type": "image",
+      "group": "bsm2",
+      "description": "BSM2 COD 预测结果图"
+    },
+    {
+      "name": "auto_mamformer_bsm2_bod_results.npy",
+      "type": "npy",
+      "group": "bsm2",
+      "description": "BSM2 BOD5 预测结果数据"
+    },
+    {
+      "name": "auto_mamformer_bsm2_bod_results.png",
+      "type": "image",
+      "group": "bsm2",
+      "description": "BSM2 BOD5 预测结果图"
+    },
+    {
+      "name": "auto_mamformer_bsm2_summary.json",
+      "type": "json",
+      "group": "bsm2",
+      "description": "BSM2 COD/BOD5 指标摘要"
+    }
+  ]
+}

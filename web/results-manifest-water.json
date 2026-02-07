@@ -1,0 +1,36 @@
+{
+  "generated_for": "auto-mamformer-water",
+  "result_root": "../result",
+  "artifacts": [
+    {
+      "name": "auto_mamformer_bod_results.npy",
+      "type": "npy",
+      "group": "water",
+      "description": "Water BOD 预测结果数据"
+    },
+    {
+      "name": "auto_mamformer_bod_results.png",
+      "type": "image",
+      "group": "water",
+      "description": "Water BOD 预测结果图"
+    },
+    {
+      "name": "auto_mamformer_cod_results.npy",
+      "type": "npy",
+      "group": "water",
+      "description": "Water COD 预测结果数据"
+    },
+    {
+      "name": "auto_mamformer_cod_results.png",
+      "type": "image",
+      "group": "water",
+      "description": "Water COD 预测结果图"
+    },
+    {
+      "name": "auto_mamformer_water_summary.json",
+      "type": "json",
+      "group": "water",
+      "description": "Water BOD/COD 指标摘要"
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 """
-Auto-Mamformer模型 - 废水处理BOD预测版本
+Auto-Mamformer模型 - 废水处理COD预测版本
 Mamba + Autoformer混合架构
 
 核心架构：
@@ -14,11 +14,12 @@ Mamba + Autoformer混合架构
 
 数据说明：
 - 输入：废水处理厂各项指标（流量、PH、BOD、COD、SS等）
-- 目标：预测BOD-S（二沉池出水BOD）
+- 目标：预测COD-S（二沉池出水COD）
 - 特征选择：基于相关性和专业知识选择关键输入变量
 """
 
 import os
+import json
 import pandas as pd
 import numpy as np
 import torch
@@ -53,6 +54,28 @@ else:
 
 # 解决负号显示问题
 plt.rcParams['axes.unicode_minus'] = False
+
+
+def resolve_water_data_path(filename='water-treatment_model_cleaned.csv'):
+    """解析water数据文件路径，兼容从不同工作目录启动脚本。"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
+
+    candidates = [
+        filename,
+        os.path.join(script_dir, filename),
+        os.path.join(repo_root, filename),
+        os.path.join(repo_root, 'data', 'water', filename),
+    ]
+
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+
+    raise FileNotFoundError(
+        f"未找到数据文件: {filename}\n"
+        f"已检查路径:\n- " + "\n- ".join(candidates)
+    )
 
 # 设置随机种子 - 确保结果可重复
 def set_seed(seed=42):
@@ -439,7 +462,7 @@ class AutoMamformerBlock(nn.Module):
 
 class AutoMamformerModel(nn.Module):
     """
-    Auto-Mamformer模型 - BOD预测版本
+    Auto-Mamformer模型 - COD预测版本
     Mamba + Autoformer混合架构
     """
     def __init__(self, input_dim, d_model=128, n_layers=4, seq_len=24, pred_len=1, dropout=0.15):
@@ -594,25 +617,25 @@ def analyze_data_and_select_features(file_path):
     missing_values = data.isnull().sum()
     print(missing_values[missing_values > 0])
     
-    # 计算与BOD-S的相关性
-    print("\n与BOD-S的相关性分析:")
-    if 'BOD-S' in data.columns:
-        correlations = data.corr()['BOD-S'].sort_values(ascending=False)
+    # 计算与COD-S的相关性
+    print("\n与COD-S的相关性分析:")
+    if 'COD-S' in data.columns:
+        correlations = data.corr()['COD-S'].sort_values(ascending=False)
         print(correlations)
         
         # 可视化相关性
         plt.figure(figsize=(12, 8))
         correlations[1:21].plot(kind='barh')
-        plt.title('Top 20 Features Correlated with BOD-S')
+        plt.title('Top 20 Features Correlated with COD-S')
         plt.xlabel('Correlation Coefficient')
         plt.tight_layout()
-        plt.savefig('result/bod_feature_correlation.png', dpi=300, bbox_inches='tight')
-        print("\n相关性图已保存至: result/bod_feature_correlation.png")
+        plt.savefig('result/cod_feature_correlation.png', dpi=300, bbox_inches='tight')
+        print("\n相关性图已保存至: result/cod_feature_correlation.png")
         
         # 推荐使用全部可用特征（保留完整工艺信息）
         available_features = list(data.columns)
-        if 'BOD-S' in available_features:
-            available_features = [col for col in available_features if col != 'BOD-S'] + ['BOD-S']
+        if 'COD-S' in available_features:
+            available_features = [col for col in available_features if col != 'COD-S'] + ['COD-S']
         print(f"\n使用全部特征进行建模（总计 {len(available_features)-1} 个输入特征）")
         for feat in available_features[:-1]:
             if feat in correlations.index:
@@ -620,7 +643,7 @@ def analyze_data_and_select_features(file_path):
         
         return data, available_features
     else:
-        print("\n警告: 数据中未找到BOD-S列，请检查数据格式")
+        print("\n警告: 数据中未找到COD-S列，请检查数据格式")
         return data, None
 
 
@@ -659,12 +682,12 @@ def preprocess_wastewater_data(data, selected_features):
         feature_data[col] = feature_data[col].clip(mean - 3*std, mean + 3*std)
     
     print(f"预处理后数据形状: {feature_data.shape}")
-    print(f"\nBOD-S统计信息:\n{feature_data['BOD-S'].describe()}")
+    print(f"\nCOD-S统计信息:\n{feature_data['COD-S'].describe()}")
     
     return feature_data
 
 
-def apply_feature_engineering(data, start_idx=0, target_col='BOD-S'):
+def apply_feature_engineering(data, start_idx=0, target_col='COD-S'):
     """
     应用特征工程 - 针对废水处理数据
     """
@@ -679,7 +702,7 @@ def apply_feature_engineering(data, start_idx=0, target_col='BOD-S'):
     lag_windows = [1, 2, 3, 6, 12]
     lag_columns = [
         target_col,
-        'SS-S', 'COD-S', 'BOD-D', 'COD-D',
+        'SS-S', 'BOD-S', 'BOD-D', 'COD-D',
         'BOD-E', 'COD-E', 'SS-E', 'BOD-P', 'SS-P'
     ]
     for col in lag_columns:
@@ -689,7 +712,7 @@ def apply_feature_engineering(data, start_idx=0, target_col='BOD-S'):
     
     # 2. 移动平均特征 - 捕捉趋势
     ma_windows = [3, 6, 12, 24]
-    ma_columns = ['BOD-S', 'SS-S', 'BOD-D', 'COD-D', 'BOD-E', 'COD-E']
+    ma_columns = ['COD-S', 'SS-S', 'BOD-D', 'COD-D', 'BOD-E', 'COD-E']
     for col in ma_columns:
         if col in feature_data.columns:
             for window in ma_windows:
@@ -697,7 +720,7 @@ def apply_feature_engineering(data, start_idx=0, target_col='BOD-S'):
                     window=window, min_periods=1).mean()
     
     # 3. 差分特征 - 捕捉变化率
-    diff_columns = ['BOD-S', 'SS-S', 'BOD-D', 'COD-D', 'BOD-E', 'COD-E']
+    diff_columns = ['COD-S', 'SS-S', 'BOD-D', 'COD-D', 'BOD-E', 'COD-E']
     for col in diff_columns:
         if col in feature_data.columns:
             feature_data[f'{col}_diff_1'] = feature_data[col].diff(1)
@@ -757,7 +780,7 @@ def create_data_splits(
     seq_len=24,
     test_size=0.2,
     augment_factor=1,
-    target_col='BOD-S',
+    target_col='COD-S',
     use_feature_engineering=True,
     top_feature_count=None
 ):
@@ -922,12 +945,12 @@ def train_final_model(model, train_loader, val_loader, epochs=60, lr=0.001, pati
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             patience_counter = 0
-            torch.save(model.state_dict(), 'model/auto_mamformer_bod.pth')
+            torch.save(model.state_dict(), 'model/auto_mamformer_cod.pth')
         else:
             patience_counter += 1
         
         print(f'Epoch [{epoch + 1:2d}/{epochs}] '
-              f'Train: {train_loss:.4f} | Val: {val_loss:.4f} | R²: {val_r2:.4f} | '
+              f'Train: {train_loss:.4f} | Val: {val_loss:.4f} | R2: {val_r2:.4f} | '
               f'LR: {optimizer.param_groups[0]["lr"]:.6f} | Time: {epoch_time:.2f}s'
               f'{" | GPU: " + gpu_name if gpu_name else ""}')
         
@@ -936,7 +959,7 @@ def train_final_model(model, train_loader, val_loader, epochs=60, lr=0.001, pati
             break
     
     # 加载最佳模型
-    model.load_state_dict(torch.load('model/auto_mamformer_bod.pth'))
+    model.load_state_dict(torch.load('model/auto_mamformer_cod.pth'))
     return model, train_losses, val_losses
 
 
@@ -1002,7 +1025,7 @@ def evaluate_model(model, test_loader, scaler, calibrator=None, external_feature
     rmse = np.sqrt(mse)
     
     print(f"\n模型评估结果:")
-    print(f"R² Score: {r2:.4f}")
+    print(f"R2 Score: {r2:.4f}")
     print(f"MSE: {mse:.4f}")
     print(f"MAE: {mae:.4f}")
     print(f"RMSE: {rmse:.4f}")
@@ -1010,11 +1033,11 @@ def evaluate_model(model, test_loader, scaler, calibrator=None, external_feature
     plt.figure(figsize=(14, 5))
     
     plt.subplot(1, 2, 1)
-    plt.plot(true_values_rescaled[:200], label='True BOD-S', alpha=0.7)
-    plt.plot(predictions_calibrated[:200], label='Predicted BOD-S', alpha=0.7)
+    plt.plot(true_values_rescaled[:200], label='True COD-S', alpha=0.7)
+    plt.plot(predictions_calibrated[:200], label='Predicted COD-S', alpha=0.7)
     plt.xlabel('Sample Index')
-    plt.ylabel('BOD-S (mg/L)')
-    plt.title('Auto-Mamformer: BOD-S Prediction Results (First 200 Samples)')
+    plt.ylabel('COD-S (mg/L)')
+    plt.title('Auto-Mamformer: COD-S Prediction Results (First 200 Samples)')
     plt.legend()
     plt.grid(True, alpha=0.3)
     
@@ -1023,14 +1046,14 @@ def evaluate_model(model, test_loader, scaler, calibrator=None, external_feature
     plt.plot([true_values_rescaled.min(), true_values_rescaled.max()],
              [true_values_rescaled.min(), true_values_rescaled.max()],
              'r--', lw=2)
-    plt.xlabel('True BOD-S (mg/L)')
-    plt.ylabel('Predicted BOD-S (mg/L)')
-    plt.title(f'Prediction vs True (R² = {r2:.4f})')
+    plt.xlabel('True COD-S (mg/L)')
+    plt.ylabel('Predicted COD-S (mg/L)')
+    plt.title(f'Prediction vs True (R2 = {r2:.4f})')
     plt.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig('result/auto_mamformer_bod_results.png', dpi=300, bbox_inches='tight')
-    print("\n预测结果图已保存至: result/auto_mamformer_bod_results.png")
+    plt.savefig('result/auto_mamformer_cod_results.png', dpi=300, bbox_inches='tight')
+    print("\n预测结果图已保存至: result/auto_mamformer_cod_results.png")
     
     return r2, mse, mae, rmse, predictions_calibrated, true_values_rescaled
 
@@ -1040,7 +1063,7 @@ def main():
     set_seed(42)
     
     print("=" * 60)
-    print("Auto-Mamformer - 废水处理BOD预测")
+    print("Auto-Mamformer - 废水处理COD预测")
     print("Mamba + Autoformer混合架构")
     print("=" * 60)
     
@@ -1049,7 +1072,9 @@ def main():
     os.makedirs('result', exist_ok=True)
     
     # 1. 数据分析与特征选择
-    data, selected_features = analyze_data_and_select_features('water-treatment_model_cleaned.csv')
+    data_path = resolve_water_data_path('water-treatment_model_cleaned.csv')
+    print(f"使用数据文件: {data_path}")
+    data, selected_features = analyze_data_and_select_features(data_path)
     
     if selected_features is None:
         print("错误: 无法继续，请检查数据格式")
@@ -1070,7 +1095,7 @@ def main():
         seq_len=seq_len,
         test_size=0.2,
         augment_factor=2,
-        target_col='BOD-S',
+        target_col='COD-S',
         use_feature_engineering=True,
         top_feature_count=60
     )
@@ -1161,10 +1186,12 @@ def main():
     mse = mean_squared_error(test_true_rescaled, test_pred_rescaled)
     mae = mean_absolute_error(test_true_rescaled, test_pred_rescaled)
     rmse = np.sqrt(mse)
+    mask = np.abs(test_true_rescaled) > 1e-8
+    mape = float(np.mean(np.abs((test_true_rescaled[mask] - test_pred_rescaled[mask]) / test_true_rescaled[mask])) * 100)
 
     print(f"\n模型评估结果:")
-    print(f"R² Score: {r2:.4f}")
-    print(f"MSE: {mse:.4f}")
+    print(f"R2 Score: {r2:.4f}")
+    print(f"MAPE: {mape:.2f}%")
     print(f"MAE: {mae:.4f}")
     print(f"RMSE: {rmse:.4f}")
 
@@ -1172,11 +1199,11 @@ def main():
     plt.figure(figsize=(14, 5))
     
     plt.subplot(1, 2, 1)
-    plt.plot(test_true_rescaled[:200], label='True BOD-S', alpha=0.7)
-    plt.plot(test_pred_rescaled[:200], label='Predicted BOD-S', alpha=0.7)
+    plt.plot(test_true_rescaled[:200], label='True COD-S', alpha=0.7)
+    plt.plot(test_pred_rescaled[:200], label='Predicted COD-S', alpha=0.7)
     plt.xlabel('Sample Index')
-    plt.ylabel('BOD-S (mg/L)')
-    plt.title('Auto-Mamformer: BOD-S Prediction Results (First 200 Samples)')
+    plt.ylabel('COD-S (mg/L)')
+    plt.title('Auto-Mamformer: COD-S Prediction Results (First 200 Samples)')
     plt.legend()
     plt.grid(True, alpha=0.3)
     
@@ -1185,14 +1212,14 @@ def main():
     plt.plot([test_true_rescaled.min(), test_true_rescaled.max()],
              [test_true_rescaled.min(), test_true_rescaled.max()],
              'r--', lw=2)
-    plt.xlabel('True BOD-S (mg/L)')
-    plt.ylabel('Predicted BOD-S (mg/L)')
-    plt.title(f'Prediction vs True (R² = {r2:.4f})')
+    plt.xlabel('True COD-S (mg/L)')
+    plt.ylabel('Predicted COD-S (mg/L)')
+    plt.title(f'Prediction vs True (R2 = {r2:.4f})')
     plt.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig('result/auto_mamformer_bod_results.png', dpi=300, bbox_inches='tight')
-    print("\n预测结果图已保存至: result/auto_mamformer_bod_results.png")
+    plt.savefig('result/auto_mamformer_cod_results.png', dpi=300, bbox_inches='tight')
+    print("\n预测结果图已保存至: result/auto_mamformer_cod_results.png")
     
     predictions = test_pred_rescaled
     true_values = test_true_rescaled
@@ -1200,7 +1227,7 @@ def main():
     # 10. 保存结果
     results = {
         'r2': r2,
-        'mse': mse,
+        'mape': mape,
         'mae': mae,
         'rmse': rmse,
         'predictions': predictions,
@@ -1210,15 +1237,31 @@ def main():
         'calibrator_type': None
     }
     
-    np.save('result/auto_mamformer_bod_results.npy', results)
-    print("\n结果已保存至: result/auto_mamformer_bod_results.npy")
+    np.save('result/auto_mamformer_cod_results.npy', results)
+    print("\n结果已保存至: result/auto_mamformer_cod_results.npy")
+
+    # 保存/更新 water summary JSON
+    summary_path = 'result/auto_mamformer_water_summary.json'
+    summary = {}
+    if os.path.exists(summary_path):
+        with open(summary_path, 'r', encoding='utf-8') as f:
+            summary = json.load(f)
+    summary['cod'] = {
+        'r2': float(r2),
+        'mape': float(mape),
+        'mae': float(mae),
+        'rmse': float(rmse)
+    }
+    with open(summary_path, 'w', encoding='utf-8') as f:
+        json.dump(summary, f, ensure_ascii=False, indent=2)
+    print(f"\nWater summary已更新至: {summary_path}")
     
     # 10. 输出最终评估
     print("\n" + "=" * 60)
     print("🎯 Auto-Mamformer模型最终结果:")
     print("=" * 60)
-    print(f"测试集 R² Score: {r2:.4f}")
-    print(f"MSE: {mse:.4f} (mg/L)²")
+    print(f"测试集 R2 Score: {r2:.4f}")
+    print(f"MAPE: {mape:.2f}%")
     print(f"MAE: {mae:.4f} mg/L")
     print(f"RMSE: {rmse:.4f} mg/L")
     
@@ -1239,4 +1282,3 @@ if __name__ == "__main__":
     multiprocessing.freeze_support()
     
     main()
-
