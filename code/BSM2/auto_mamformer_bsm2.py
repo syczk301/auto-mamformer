@@ -26,9 +26,20 @@ import torch.nn as nn
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import RobustScaler
 from torch.cuda.amp import GradScaler, autocast
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 warnings.filterwarnings("ignore")
+
+
+# Runtime optimization defaults
+torch.backends.cudnn.benchmark = True
+if torch.cuda.is_available():
+    if hasattr(torch.backends.cuda.matmul, "allow_tf32"):
+        torch.backends.cuda.matmul.allow_tf32 = True
+    if hasattr(torch.backends.cudnn, "allow_tf32"):
+        torch.backends.cudnn.allow_tf32 = True
+if hasattr(torch, "set_float32_matmul_precision"):
+    torch.set_float32_matmul_precision("medium")
 
 
 # COD and BOD5 formula follows bsm2_python.bsm2.plantperformance.PlantPerformance.advanced_quantities
@@ -40,9 +51,15 @@ BOD_COMPONENTS = ("SS", "XS", "XBH", "XBA")
 def load_auto_mamformer_components():
     """Load AutoMamformerModel and TimeSeriesDataset from existing COD script."""
     repo_root = Path(__file__).resolve().parents[2]
-    source_file = repo_root / "code" / "cod" / "auto_mamformer_cod.py"
-    if not source_file.exists():
-        raise FileNotFoundError(f"Cannot find source model file: {source_file}")
+    candidates = [
+        repo_root / "code" / "water" / "auto_mamformer_cod.py",
+        repo_root / "code" / "cod" / "auto_mamformer_cod.py",
+    ]
+    source_file = next((p for p in candidates if p.exists()), None)
+    if source_file is None:
+        raise FileNotFoundError(
+            "Cannot find source model file. Checked:\n- " + "\n- ".join(str(p) for p in candidates)
+        )
 
     spec = importlib.util.spec_from_file_location("_auto_mamformer_cod_module", source_file)
     if spec is None or spec.loader is None:
@@ -51,6 +68,37 @@ def load_auto_mamformer_components():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.AutoMamformerModel, module.TimeSeriesDataset, module.set_seed
+
+
+class FastTensorDataset(Dataset):
+    """Torch tensor dataset to avoid per-sample numpy->tensor conversion overhead."""
+
+    def __init__(
+        self,
+        sequences: torch.Tensor,
+        targets: torch.Tensor,
+        indices: np.ndarray,
+        augment_prob: float = 0.0,
+        augment_std: float = 0.01,
+    ):
+        self.sequences = sequences
+        self.targets = targets
+        self.indices = torch.as_tensor(indices, dtype=torch.long)
+        self.augment_prob = float(augment_prob)
+        self.augment_std = float(augment_std)
+
+    def __len__(self):
+        return int(self.indices.numel())
+
+    def __getitem__(self, idx: int):
+        real_idx = int(self.indices[idx])
+        seq = self.sequences[real_idx]
+        target = self.targets[real_idx]
+
+        if self.augment_prob > 0.0 and torch.rand(1).item() < self.augment_prob:
+            seq = seq + torch.randn_like(seq) * self.augment_std
+
+        return seq, target
 
 
 def add_bsm2_targets(df: pd.DataFrame) -> pd.DataFrame:
@@ -169,19 +217,27 @@ def prepare_training_frame(
 
 def create_data_splits(
     frame: pd.DataFrame,
-    dataset_cls,
     seq_len: int = 24,
     test_size: float = 0.2,
     augment_factor: int = 1,
 ):
     """Create train/test split after scaling and sequence conversion."""
     scaler = RobustScaler(quantile_range=(5.0, 95.0))
-    scaled_values = scaler.fit_transform(frame.values)
+    scaled_values = scaler.fit_transform(frame.values).astype(np.float32, copy=False)
 
-    base_dataset_eval = dataset_cls(scaled_values, seq_len=seq_len, augment=False)
-    base_dataset_train = dataset_cls(scaled_values, seq_len=seq_len, augment=(augment_factor > 1))
+    features = scaled_values[:, :-1]
+    targets = scaled_values[:, -1:]
+    if len(features) < seq_len:
+        raise ValueError(f"Not enough rows for seq_len={seq_len}: {len(features)}")
 
-    total_samples = len(base_dataset_eval)
+    # sliding window over time dimension, then transpose to [N, seq_len, input_dim]
+    windows = np.lib.stride_tricks.sliding_window_view(features, window_shape=seq_len, axis=0)
+    sequences = np.transpose(windows, (0, 2, 1)).copy()
+    target_seq = targets[seq_len - 1 :].copy()
+
+    seq_tensor = torch.from_numpy(sequences)
+    target_tensor = torch.from_numpy(target_seq)
+    total_samples = seq_tensor.shape[0]
     if total_samples < 10:
         raise ValueError(f"Not enough sequence samples after preprocessing: {total_samples}")
 
@@ -192,17 +248,20 @@ def create_data_splits(
 
     generator = torch.Generator()
     generator.manual_seed(42)
-    all_indices = torch.randperm(total_samples, generator=generator)
-    test_indices = all_indices[:test_samples].tolist()
-    train_indices = all_indices[test_samples:].tolist()
+    all_indices = torch.randperm(total_samples, generator=generator).numpy()
+    test_indices = all_indices[:test_samples]
+    train_indices = all_indices[test_samples:]
 
-    train_dataset = torch.utils.data.Subset(base_dataset_train, train_indices)
-    test_dataset = torch.utils.data.Subset(base_dataset_eval, test_indices)
+    train_augment_prob = 0.4 if augment_factor > 1 else 0.0
+    train_dataset = FastTensorDataset(
+        seq_tensor, target_tensor, train_indices, augment_prob=train_augment_prob, augment_std=0.01
+    )
+    test_dataset = FastTensorDataset(seq_tensor, target_tensor, test_indices, augment_prob=0.0, augment_std=0.0)
 
     return train_dataset, test_dataset, scaler, frame.shape[1] - 1
 
 
-def build_dataloaders(train_dataset, test_dataset, batch_size: int):
+def build_dataloaders(train_dataset, test_dataset, batch_size: int, num_workers_override: int = -1):
     """Build train/val/test dataloaders with the same strategy as existing scripts."""
     if len(train_dataset) < 2:
         raise ValueError("Train dataset is too small to create a validation split.")
@@ -217,11 +276,30 @@ def build_dataloaders(train_dataset, test_dataset, batch_size: int):
     loader_train_indices = list(range(train_size))
     loader_val_indices = list(range(train_size, len(train_dataset)))
 
-    train_subset = torch.utils.data.Subset(train_dataset, loader_train_indices)
-    val_subset = torch.utils.data.Subset(train_dataset, loader_val_indices)
+    train_indices = train_dataset.indices.numpy()
+    train_subset = FastTensorDataset(
+        train_dataset.sequences,
+        train_dataset.targets,
+        train_indices[loader_train_indices],
+        augment_prob=train_dataset.augment_prob,
+        augment_std=train_dataset.augment_std,
+    )
+    val_subset = FastTensorDataset(
+        train_dataset.sequences,
+        train_dataset.targets,
+        train_indices[loader_val_indices],
+        augment_prob=0.0,
+        augment_std=0.0,
+    )
 
     is_windows = platform.system() == "Windows"
-    if is_windows:
+    if num_workers_override is not None and num_workers_override >= 0:
+        num_workers = int(num_workers_override)
+        pin_memory = torch.cuda.is_available()
+        persistent_workers = num_workers > 0
+        prefetch_factor = 2 if num_workers > 0 else None
+    elif is_windows:
+        # Windows multiprocess loader startup overhead is often high; keep default single-process.
         num_workers = 0
         pin_memory = torch.cuda.is_available()
         persistent_workers = False
@@ -248,17 +326,18 @@ def build_dataloaders(train_dataset, test_dataset, batch_size: int):
         "drop_last": True,
         "generator": generator,
     }
-    if not is_windows:
+    if num_workers > 0:
         train_loader_kwargs["persistent_workers"] = persistent_workers
         train_loader_kwargs["prefetch_factor"] = prefetch_factor
 
+    eval_batch_size = max(batch_size, batch_size * 2)
     eval_loader_kwargs = {
-        "batch_size": batch_size,
+        "batch_size": eval_batch_size,
         "shuffle": False,
         "num_workers": num_workers,
         "pin_memory": pin_memory,
     }
-    if not is_windows:
+    if num_workers > 0:
         eval_loader_kwargs["persistent_workers"] = persistent_workers
         eval_loader_kwargs["prefetch_factor"] = prefetch_factor
 
@@ -276,18 +355,43 @@ def train_model(
     epochs: int,
     lr: float,
     patience: int,
+    use_compile: bool = False,
+    amp_dtype: str = "fp16",
+    r2_every: int = 5,
+    val_every: int = 5,
+    grad_clip: float = 1.0,
 ):
     """Train with the same optimizer/scheduler/loss strategy as current Auto-Mamformer scripts."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
     use_cuda = device.type == "cuda"
 
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=lr,
-        weight_decay=5e-4,
-        betas=(0.9, 0.95),
-    )
+    if use_cuda and use_compile and hasattr(torch, "compile"):
+        try:
+            model = torch.compile(model)
+            print("torch.compile enabled.")
+        except Exception as exc:
+            print(f"torch.compile failed, fallback to eager mode: {exc}")
+
+    if amp_dtype.lower() == "bf16":
+        amp_torch_dtype = torch.bfloat16
+    else:
+        amp_torch_dtype = torch.float16
+
+    optimizer_kwargs = {
+        "params": model.parameters(),
+        "lr": lr,
+        "weight_decay": 5e-4,
+        "betas": (0.9, 0.95),
+    }
+    if use_cuda:
+        try:
+            optimizer = torch.optim.AdamW(**optimizer_kwargs, fused=True)
+            print("AdamW fused enabled.")
+        except TypeError:
+            optimizer = torch.optim.AdamW(**optimizer_kwargs)
+    else:
+        optimizer = torch.optim.AdamW(**optimizer_kwargs)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
         optimizer, T_0=15, T_mult=2, eta_min=lr * 0.01
     )
@@ -312,9 +416,9 @@ def train_model(
         for batch_x, batch_y in train_loader:
             batch_x = batch_x.to(device, non_blocking=True)
             batch_y = batch_y.to(device, non_blocking=True)
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
 
-            amp_context = autocast(dtype=torch.float16) if use_cuda else nullcontext()
+            amp_context = autocast(dtype=amp_torch_dtype) if use_cuda else nullcontext()
             with amp_context:
                 pred = model(batch_x)
                 mse_loss = mse_criterion(pred.squeeze(), batch_y.squeeze())
@@ -323,63 +427,82 @@ def train_model(
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            if grad_clip and grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
             scaler.step(optimizer)
             scaler.update()
 
             running_train_loss += loss.item()
 
-        model.eval()
-        running_val_loss = 0.0
-        val_preds = []
-        val_trues = []
+        do_validate = ((epoch + 1) % max(1, val_every) == 0) or (epoch == 0) or (epoch + 1 == epochs)
+        if do_validate:
+            model.eval()
+            running_val_loss = 0.0
+            need_r2 = ((epoch + 1) % max(1, r2_every) == 0) or (epoch == 0) or (epoch + 1 == epochs)
+            val_preds = [] if need_r2 else None
+            val_trues = [] if need_r2 else None
 
-        with torch.no_grad():
-            for batch_x, batch_y in val_loader:
-                batch_x = batch_x.to(device, non_blocking=True)
-                batch_y = batch_y.to(device, non_blocking=True)
+            with torch.no_grad():
+                for batch_x, batch_y in val_loader:
+                    batch_x = batch_x.to(device, non_blocking=True)
+                    batch_y = batch_y.to(device, non_blocking=True)
 
-                amp_context = autocast(dtype=torch.float16) if use_cuda else nullcontext()
-                with amp_context:
-                    pred = model(batch_x)
-                    val_loss = mse_criterion(pred.squeeze(), batch_y.squeeze())
+                    amp_context = autocast(dtype=amp_torch_dtype) if use_cuda else nullcontext()
+                    with amp_context:
+                        pred = model(batch_x)
+                        val_loss = mse_criterion(pred.squeeze(), batch_y.squeeze())
 
-                running_val_loss += val_loss.item()
-                val_preds.append(pred.detach().cpu())
-                val_trues.append(batch_y.detach().cpu())
+                    running_val_loss += val_loss.item()
+                    if need_r2:
+                        val_preds.append(pred.detach().cpu())
+                        val_trues.append(batch_y.detach().cpu())
+        else:
+            running_val_loss = float("nan")
+            need_r2 = False
 
         train_loss = running_train_loss / max(1, len(train_loader))
-        val_loss = running_val_loss / max(1, len(val_loader))
+        val_loss = running_val_loss / max(1, len(val_loader)) if do_validate else float("nan")
         train_losses.append(train_loss)
         val_losses.append(val_loss)
 
-        val_pred_arr = torch.cat(val_preds).squeeze().numpy()
-        val_true_arr = torch.cat(val_trues).squeeze().numpy()
-        if np.size(val_true_arr) > 1:
-            val_r2 = r2_score(val_true_arr, val_pred_arr)
+        if do_validate and need_r2:
+            val_pred_arr = torch.cat(val_preds).squeeze().numpy()
+            val_true_arr = torch.cat(val_trues).squeeze().numpy()
+            if np.size(val_true_arr) > 1:
+                val_r2 = r2_score(val_true_arr, val_pred_arr)
+            else:
+                val_r2 = float("nan")
         else:
             val_r2 = float("nan")
 
         scheduler.step()
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            patience_counter = 0
-            torch.save(model.state_dict(), model_save_path)
-        else:
-            patience_counter += 1
+        if do_validate:
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                patience_counter = 0
+                torch.save(model.state_dict(), model_save_path)
+            else:
+                patience_counter += 1
 
         if use_cuda:
             torch.cuda.synchronize()
         epoch_time = time.time() - start_time
+        val_text = f"{val_loss:.4f}" if do_validate else "skip"
+        if do_validate and need_r2 and np.isfinite(val_r2):
+            r2_text = f"{val_r2:.4f}"
+        elif do_validate and need_r2:
+            r2_text = "nan"
+        else:
+            r2_text = "skip"
         print(
             f"Epoch [{epoch + 1:3d}/{epochs}] "
-            f"Train: {train_loss:.4f} | Val: {val_loss:.4f} | "
-            f"R2: {val_r2:.4f} | LR: {optimizer.param_groups[0]['lr']:.6f} | "
+            f"Train: {train_loss:.4f} | Val: {val_text} | "
+            f"R2: {r2_text} | LR: {optimizer.param_groups[0]['lr']:.6f} | "
             f"Time: {epoch_time:.2f}s"
         )
 
-        if patience_counter >= patience:
+        if do_validate and patience_counter >= patience:
             print(f"Early stopping triggered after {patience} epochs without improvement.")
             break
 
@@ -467,8 +590,8 @@ def run_single_target(
     target_key: str,
     args: argparse.Namespace,
     AutoMamformerModel,
-    TimeSeriesDataset,
     set_seed_fn,
+    raw_df: pd.DataFrame,
 ):
     """Train/evaluate one target (`cod` or `bod`)."""
     target_map = {
@@ -484,9 +607,6 @@ def run_single_target(
     print("=" * 70)
 
     set_seed_fn(args.seed)
-    raw_df = pd.read_csv(args.data_path)
-    raw_df = add_bsm2_targets(raw_df)
-
     if target_col not in raw_df.columns:
         raise ValueError(f"Target column not found after target construction: {target_col}")
 
@@ -500,13 +620,15 @@ def run_single_target(
 
     train_dataset, test_dataset, scaler, input_dim = create_data_splits(
         frame,
-        dataset_cls=TimeSeriesDataset,
         seq_len=args.seq_len,
         test_size=args.test_size,
         augment_factor=args.augment_factor,
     )
     train_loader, val_loader, test_loader = build_dataloaders(
-        train_dataset, test_dataset, batch_size=args.batch_size
+        train_dataset,
+        test_dataset,
+        batch_size=args.batch_size,
+        num_workers_override=args.num_workers,
     )
 
     model = AutoMamformerModel(
@@ -532,6 +654,11 @@ def run_single_target(
         epochs=args.epochs,
         lr=args.lr,
         patience=args.patience,
+        use_compile=args.compile,
+        amp_dtype=args.amp_dtype,
+        r2_every=args.r2_every,
+        val_every=args.val_every,
+        grad_clip=args.grad_clip,
     )
 
     pred_rescaled, true_rescaled = get_rescaled_predictions(model, test_loader, scaler)
@@ -569,12 +696,12 @@ def parse_args(argv: Sequence[str] | None = None):
     parser.add_argument("--target", choices=("cod", "bod", "both"), default="both")
 
     parser.add_argument("--seq-len", type=int, default=3)
-    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--epochs", type=int, default=180)
     parser.add_argument("--lr", type=float, default=2e-4)
     parser.add_argument("--patience", type=int, default=30)
     parser.add_argument("--test-size", type=float, default=0.2)
-    parser.add_argument("--augment-factor", type=int, default=2)
+    parser.add_argument("--augment-factor", type=int, default=1)
     parser.add_argument("--top-features", type=int, default=60)
     parser.add_argument("--max-samples", type=int, default=None)
 
@@ -582,6 +709,17 @@ def parse_args(argv: Sequence[str] | None = None):
     parser.add_argument("--n-layers", type=int, default=4)
     parser.add_argument("--dropout", type=float, default=0.15)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--num-workers", type=int, default=-1, help="-1 means auto")
+    parser.add_argument("--compile", action="store_true", help="Enable torch.compile on GPU")
+    parser.add_argument(
+        "--amp-dtype",
+        choices=("fp16", "bf16"),
+        default="fp16",
+        help="Automatic mixed precision dtype for CUDA",
+    )
+    parser.add_argument("--r2-every", type=int, default=5, help="Compute validation R2 every N epochs")
+    parser.add_argument("--val-every", type=int, default=5, help="Run full validation every N epochs")
+    parser.add_argument("--grad-clip", type=float, default=1.0, help="0 to disable gradient clipping")
 
     parser.add_argument("--model-dir", default="model")
     parser.add_argument("--result-dir", default="result")
@@ -593,7 +731,9 @@ def main(argv: Sequence[str] | None = None):
     os.makedirs(args.model_dir, exist_ok=True)
     os.makedirs(args.result_dir, exist_ok=True)
 
-    AutoMamformerModel, TimeSeriesDataset, set_seed_fn = load_auto_mamformer_components()
+    AutoMamformerModel, _, set_seed_fn = load_auto_mamformer_components()
+    raw_df = pd.read_csv(args.data_path)
+    raw_df = add_bsm2_targets(raw_df)
 
     targets = ["cod", "bod"] if args.target == "both" else [args.target]
     summary = {}
@@ -602,8 +742,8 @@ def main(argv: Sequence[str] | None = None):
             target_key=target_key,
             args=args,
             AutoMamformerModel=AutoMamformerModel,
-            TimeSeriesDataset=TimeSeriesDataset,
             set_seed_fn=set_seed_fn,
+            raw_df=raw_df,
         )
         summary[target_key] = metrics
 

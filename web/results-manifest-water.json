@@ -1,6 +1,7 @@
 {
   "generated_for": "auto-mamformer-water",
   "result_root": "../result",
+  "image_root": "./assets/results",
   "artifacts": [
     {
       "name": "auto_mamformer_bod_results.npy",

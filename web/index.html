@@ -4,40 +4,51 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Auto-Mamformer Water Dashboard</title>
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./styles.css?v=20260208i">
 </head>
 <body data-page="water">
-  <div class="bg-orb orb-a"></div>
-  <div class="bg-orb orb-b"></div>
-  <div class="bg-grid"></div>
+  <div class="ambient ambient-grid" aria-hidden="true"></div>
+  <div class="ambient ambient-wave" aria-hidden="true"></div>
+  <div class="ambient ambient-glow ambient-glow-a" aria-hidden="true"></div>
+  <div class="ambient ambient-glow ambient-glow-b" aria-hidden="true"></div>
 
-  <main class="page">
-    <header class="hero reveal">
-      <div class="hero-nav">
-        <a class="switch-link active" href="./index.html">Water 数据页</a>
-        <a class="switch-link" href="./bsm2.html">BSM2 数据页</a>
+  <main class="dashboard">
+    <header class="masthead reveal">
+      <div class="masthead-top">
+        <p class="brand">Auto-Mamformer · Research Console</p>
+        <nav class="switcher" aria-label="页面切换">
+          <a class="switch-link active" href="./index.html">Water 数据页</a>
+          <a class="switch-link" href="./bsm2.html">BSM2 数据页</a>
+        </nav>
       </div>
-      <p class="hero-kicker">Auto-Mamformer Dashboard</p>
-      <h1>Water 结果总览</h1>
-      <p class="hero-desc">
-        展示传统废水数据集的模型指标、对比结果、预测轨迹与可视化图像。
-      </p>
-      <div class="hero-meta">
-        <span id="meta-updated">读取中...</span>
-        <span id="meta-count">工件统计中...</span>
+      <div class="hero-grid">
+        <div class="hero-copy">
+          <p class="hero-kicker">Wastewater Forecast Observatory</p>
+          <h1>Water 结果总览</h1>
+          <p class="hero-desc">
+            面向传统废水数据集的预测控制台，集中呈现 COD-S / BOD-S 的核心指标、轨迹拟合与图像工件。
+          </p>
+          <div class="hero-tags">
+            <span class="hero-tag">Auto-Mamformer</span>
+            <span class="hero-tag">Water Dataset</span>
+            <span class="hero-tag" id="meta-page-tag">WATER</span>
+          </div>
+        </div>
       </div>
     </header>
 
-    <section class="section reveal" id="kpi-section">
+    <section class="section section-kpi reveal" id="kpi-section">
       <div class="section-head">
-        <h2>核心指标</h2>
+        <h2>核心指标矩阵</h2>
+        <p>统一展示 R2、MAPE、MAE、RMSE，便于快速判断预测稳定性与误差边界。</p>
       </div>
       <div class="kpi-grid" id="kpi-grid"></div>
     </section>
 
-    <section class="section reveal" id="compare-section">
+    <section class="section section-compare reveal" id="compare-section">
       <div class="section-head">
         <h2 id="compare-title">模型对比</h2>
+        <p>按 R2 自动排序，支持表格与条形可视化双视图。</p>
       </div>
       <div class="panel">
         <div class="table-wrap">
@@ -58,41 +69,37 @@
       </div>
     </section>
 
-    <section class="section reveal" id="track-section">
+    <section class="section section-viz reveal" id="viz-section">
       <div class="section-head">
-        <h2>预测轨迹</h2>
+        <h2>轨迹与图像联动视图</h2>
+        <p>左侧展示预测轨迹，右侧在页内进行图像预览与切换。</p>
       </div>
-      <div class="track-grid" id="track-grid"></div>
+      <div class="viz-layout" id="viz-layout">
+        <article class="viz-panel" id="track-panel">
+          <div class="viz-panel-head">
+            <h3>预测轨迹</h3>
+          </div>
+          <div class="track-grid" id="track-grid"></div>
+        </article>
+        <article class="viz-panel" id="figure-panel">
+          <div class="viz-panel-head">
+            <h3>图像结果</h3>
+          </div>
+          <div class="figure-preview" id="figure-preview" hidden>
+            <img id="figure-preview-img" alt="结果图预览" loading="lazy">
+            <div class="figure-preview-meta">
+              <p class="figure-preview-title" id="figure-preview-title"></p>
+              <p class="figure-preview-desc" id="figure-preview-desc"></p>
+            </div>
+          </div>
+          <div class="gallery" id="figure-gallery"></div>
+        </article>
+      </div>
     </section>
 
-    <section class="section reveal" id="figure-section">
-      <div class="section-head">
-        <h2>图像结果</h2>
-      </div>
-      <div class="gallery" id="figure-gallery"></div>
-    </section>
-
-    <section class="section reveal" id="artifact-section">
-      <div class="section-head">
-        <h2>全部工件</h2>
-      </div>
-      <div class="panel">
-        <div class="table-wrap">
-          <table id="artifact-table">
-            <thead>
-              <tr>
-                <th>文件名</th>
-                <th>类型</th>
-                <th>分组</th>
-                <th>说明</th>
-                <th>链接</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </div>
-    </section>
+    <footer class="footnote reveal">
+      <p>Auto-Mamformer Dashboard · Unified Water / BSM2 Result Console</p>
+    </footer>
   </main>
 
   <template id="kpi-card-template">
@@ -103,6 +110,6 @@
     </article>
   </template>
 
-  <script src="./app.js" defer></script>
+  <script src="./app.js?v=20260208f" defer></script>
 </body>
 </html>

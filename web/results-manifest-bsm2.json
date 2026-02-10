@@ -1,6 +1,7 @@
 {
   "generated_for": "auto-mamformer-bsm2",
   "result_root": "../result",
+  "image_root": "./assets/results",
   "artifacts": [
     {
       "name": "auto_mamformer_bsm2_cod_results.npy",

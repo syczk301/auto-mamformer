@@ -4,40 +4,68 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Auto-Mamformer BSM2 Dashboard</title>
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./styles.css?v=20260208i">
 </head>
 <body data-page="bsm2">
-  <div class="bg-orb orb-a"></div>
-  <div class="bg-orb orb-b"></div>
-  <div class="bg-grid"></div>
+  <div class="ambient ambient-grid" aria-hidden="true"></div>
+  <div class="ambient ambient-wave" aria-hidden="true"></div>
+  <div class="ambient ambient-glow ambient-glow-a" aria-hidden="true"></div>
+  <div class="ambient ambient-glow ambient-glow-b" aria-hidden="true"></div>
 
-  <main class="page">
-    <header class="hero reveal">
-      <div class="hero-nav">
-        <a class="switch-link" href="./index.html">Water 数据页</a>
-        <a class="switch-link active" href="./bsm2.html">BSM2 数据页</a>
+  <main class="dashboard">
+    <header class="masthead reveal">
+      <div class="masthead-top">
+        <p class="brand">Auto-Mamformer · Research Console</p>
+        <nav class="switcher" aria-label="页面切换">
+          <a class="switch-link" href="./index.html">Water 数据页</a>
+          <a class="switch-link active" href="./bsm2.html">BSM2 数据页</a>
+        </nav>
       </div>
-      <p class="hero-kicker">Auto-Mamformer Dashboard</p>
-      <h1>BSM2 结果总览</h1>
-      <p class="hero-desc">
-        展示 BSM2 数据集下 COD/BOD5 预测的核心指标和全部结果工件。
-      </p>
-      <div class="hero-meta">
-        <span id="meta-updated">读取中...</span>
-        <span id="meta-count">工件统计中...</span>
+      <div class="hero-grid">
+        <div class="hero-copy">
+          <p class="hero-kicker">Wastewater Forecast Observatory</p>
+          <h1>BSM2 结果总览</h1>
+          <p class="hero-desc">
+            面向 BSM2 仿真工况的预测控制台，集中呈现 COD / BOD5 关键指标与图像工件，支持快速比对结果质量。
+          </p>
+          <details class="calc-tip" id="bsm2-calc-tip">
+            <summary>小提示：BSM2 中 COD / BOD5 的计算方法（点击展开）</summary>
+            <div class="calc-tip-body">
+              <p>本页的 COD 与 BOD5 目标变量由 ASM1 状态量组合得到，和训练脚本 <code>code/BSM2/auto_mamformer_bsm2.py</code> 中 <code>add_bsm2_targets</code> 的实现完全一致。</p>
+              <p><strong>1) COD 计算（以 eff 出水为例）</strong></p>
+              <p class="calc-tip-formula"><code>eff_COD = eff_SI + eff_SS + eff_XI + eff_XS + eff_XBH + eff_XBA + eff_XP</code></p>
+              <ul class="calc-tip-list">
+                <li><code>SI, SS</code>：可溶/颗粒基质相关组分</li>
+                <li><code>XI, XS</code>：惰性/慢降解有机组分</li>
+                <li><code>XBH, XBA, XP</code>：异养菌、生长相关菌体及产物组分</li>
+              </ul>
+              <p><strong>2) BOD5 计算（以 eff 出水为例）</strong></p>
+              <p class="calc-tip-formula"><code>eff_BOD5 = 0.65 * (eff_SS + eff_XS + (1 - 0.08) * (eff_XBH + eff_XBA))</code></p>
+              <p>其中，<code>0.65</code> 为 5 日生化需氧转换系数；<code>0.08</code> 是 ASM1 中的惰性生物质分数 <code>f_p</code>。</p>
+              <p class="calc-tip-note">同理，把前缀替换为 <code>in_</code> 或 <code>r5_</code>，即可得到 <code>in_COD / in_BOD5</code> 和 <code>r5_COD / r5_BOD5</code>；本项目最终预测目标为 <code>eff_COD</code> 与 <code>eff_BOD5</code>。</p>
+            </div>
+          </details>
+          <div class="hero-tags">
+            <span class="hero-tag">Auto-Mamformer</span>
+            <span class="hero-tag">BSM2 Simulation</span>
+            <span class="hero-tag" id="meta-page-tag">BSM2</span>
+          </div>
+        </div>
       </div>
     </header>
 
-    <section class="section reveal" id="kpi-section">
+    <section class="section section-kpi reveal" id="kpi-section">
       <div class="section-head">
-        <h2>核心指标</h2>
+        <h2>核心指标矩阵</h2>
+        <p>统一展示 R2、MAPE、MAE、RMSE，便于快速判断预测稳定性与误差边界。</p>
       </div>
       <div class="kpi-grid" id="kpi-grid"></div>
     </section>
 
-    <section class="section reveal" id="compare-section">
+    <section class="section section-compare reveal" id="compare-section">
       <div class="section-head">
         <h2 id="compare-title">模型对比</h2>
+        <p>按 R2 自动排序，支持表格与条形可视化双视图。</p>
       </div>
       <div class="panel">
         <div class="table-wrap">
@@ -58,41 +86,37 @@
       </div>
     </section>
 
-    <section class="section reveal" id="track-section">
+    <section class="section section-viz reveal" id="viz-section">
       <div class="section-head">
-        <h2>预测轨迹</h2>
+        <h2>轨迹与图像联动视图</h2>
+        <p>左侧展示预测轨迹，右侧在页内进行图像预览与切换。</p>
       </div>
-      <div class="track-grid" id="track-grid"></div>
+      <div class="viz-layout" id="viz-layout">
+        <article class="viz-panel" id="track-panel">
+          <div class="viz-panel-head">
+            <h3>预测轨迹</h3>
+          </div>
+          <div class="track-grid" id="track-grid"></div>
+        </article>
+        <article class="viz-panel" id="figure-panel">
+          <div class="viz-panel-head">
+            <h3>图像结果</h3>
+          </div>
+          <div class="figure-preview" id="figure-preview" hidden>
+            <img id="figure-preview-img" alt="结果图预览" loading="lazy">
+            <div class="figure-preview-meta">
+              <p class="figure-preview-title" id="figure-preview-title"></p>
+              <p class="figure-preview-desc" id="figure-preview-desc"></p>
+            </div>
+          </div>
+          <div class="gallery" id="figure-gallery"></div>
+        </article>
+      </div>
     </section>
 
-    <section class="section reveal" id="figure-section">
-      <div class="section-head">
-        <h2>图像结果</h2>
-      </div>
-      <div class="gallery" id="figure-gallery"></div>
-    </section>
-
-    <section class="section reveal" id="artifact-section">
-      <div class="section-head">
-        <h2>全部工件</h2>
-      </div>
-      <div class="panel">
-        <div class="table-wrap">
-          <table id="artifact-table">
-            <thead>
-              <tr>
-                <th>文件名</th>
-                <th>类型</th>
-                <th>分组</th>
-                <th>说明</th>
-                <th>链接</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </div>
-    </section>
+    <footer class="footnote reveal">
+      <p>Auto-Mamformer Dashboard · Unified Water / BSM2 Result Console</p>
+    </footer>
   </main>
 
   <template id="kpi-card-template">
@@ -103,6 +127,6 @@
     </article>
   </template>
 
-  <script src="./app.js" defer></script>
+  <script src="./app.js?v=20260208f" defer></script>
 </body>
 </html>
